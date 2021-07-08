@@ -1,5 +1,6 @@
 import { getOptions, loadConfig, Config } from "./priv/config.ts"
-import { feoblog, nhm, path } from "./priv/deps.ts";
+import { feoblog, path } from "./priv/deps.ts";
+import { htmlToMarkdown } from "./priv/markdown.ts";
 import * as mast from "./priv/mast.ts";
 
 async function main(): Promise<number> {
@@ -33,12 +34,6 @@ async function main(): Promise<number> {
         const item = new StatusItem(status)
         if (lastTimestamp && item.timestamp <= lastTimestamp) { break }
         if (!item.isPublic) { continue }
-
-        // DEBUG:
-        if (item.status.content.search("#") >= 0) {
-            console.log("content:", item.status.content)
-            console.log("markdown:", item.toMarkdown())
-        }
 
         newStatuses.push(item)
         if (newStatuses.length >= options.maxStatuses) { break }
@@ -146,15 +141,6 @@ async function getApiKey(config: Config): Promise<number> {
     return 0
 }
 
-const service = new nhm.NodeHtmlMarkdown({
-    // https://github.com/crosstype/node-html-markdown#readme
-})
-
-function htmlToMarkdown(html: string|undefined): string {
-    return service.translate(html || "")
-}
-
-
 /** Some utility functions on top of a mast.Status */
 class StatusItem {
     timestamp: number;
@@ -172,6 +158,10 @@ class StatusItem {
     }
 
     toMarkdown(): string {
+        // Note: We emit HTML headers/footers and convert the whole thing to markdown
+        // because that lets turndown create nice referenced links for us at the bottom
+        // of the doc, which helps readability in un-rendered Markdown.
+        
         const s = this.status
 
         let name = s.account.acct
@@ -182,7 +172,7 @@ class StatusItem {
         let header = `[${name}](${s.account.url}) [wrote](${statusURL}):`
 
         if (!s.reblog) {
-            header = `[${name}](${s.account.url}) [wrote](${statusURL}):`
+            header = `<p>${link(s.account.url, name)} ${link(statusURL, "wrote")}:</p>`
         } else {
             let rName = s.reblog.account.acct
             if (s.reblog.account.display_name && rName.search(s.reblog.account.display_name) < 0) {
@@ -190,36 +180,37 @@ class StatusItem {
             }
             const rURL = s.reblog.url || s.reblog.uri
             header = (
-                `[Reblogged](${statusURL}) by [${name}](${s.account.url}):`
-                + "  \n" // Force a <br>
-                + `[${rName}](${s.reblog.account.url}) [wrote](${rURL}):`
+                `<p>${link(statusURL, "Reblogged")} by ${link(s.account.url, name)}:`
+                + `<br>${link(s.reblog.account.url, rName)} ${link(rURL, "wrote")}:`
+                + "</p>"
             )
         }
 
         const parts = [
             header,
             "",
-            htmlToMarkdown(`<blockquote>${s.content}</blockquote>`)
+            `<blockquote>`,
+            s.content,
+            `</blockquote>`,
         ]
 
         // Link to attached media. (But don't inline it. Seems rude to use remote bandwidth for Mastodon servers.)
         // Though, maybe we could optionally attach it to the FeoBlog post? 🤔
         if (s.media_attachments.length > 0) {
-            parts.push("")
-            parts.push("### Attachments: ###")
-            parts.push("")
-            
+            parts.push("<h3>Attachments:</h3>")
+            parts.push("<ul>")            
             for (const attachment of s.media_attachments) {
                 const desc = attachment.description || path.basename(attachment.url)
-                let link = `[${desc}](${attachment.url})`
+                let item = link(attachment.url, desc)
                 if (attachment.remote_url) {
-                    link += ` ([remote](${attachment.remote_url}))`
+                    item += ` (${link(attachment.remote_url, "remote")})`
                 }
-                parts.push(` * ${link}`)
+                parts.push(`  <li>${item}</li>`)
             }
+            parts.push("</ul>")            
         }
 
-        return parts.join("\n")
+        return htmlToMarkdown(parts.join("\n"))
     }
 
     toItem(): feoblog.protobuf.Item {
@@ -239,6 +230,15 @@ class StatusItem {
     static sortByTimestamp(a: StatusItem, b: StatusItem) {
         return a.timestamp - b.timestamp
     }
+}
+
+function link(href: string, text: string): string {
+    text = text.replaceAll(`<`, "&lt;")
+
+    // For links that are getting converted into markdown, newlines break them.
+    text = text.replaceAll(`\n`, " ")
+
+    return `<a href="${href}">${text}</a>`
 }
     
 
