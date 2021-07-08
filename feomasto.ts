@@ -1,5 +1,5 @@
 import { getOptions, loadConfig, Config } from "./priv/config.ts"
-import { nhm, path } from "./priv/deps.ts";
+import { feoblog, nhm, path } from "./priv/deps.ts";
 import * as mast from "./priv/mast.ts";
 
 async function main(): Promise<number> {
@@ -15,18 +15,45 @@ async function main(): Promise<number> {
         token: config.token
     })
 
-    const statuses: StatusItem[] = []
-    for (const status of await client.homeTimeline()) {
-        const item = new StatusItem(status)
-        if (!item.isPublic) { continue }
-
-        console.log(item)
-        statuses.push(item)
+    // Find the last status saved in FeoBlog.
+    let lastTimestamp: number|undefined = undefined
+    const fbClient = new feoblog.Client({baseURL: config.feoblog.server})
+    const userID = feoblog.UserID.fromString(config.feoblog.write.userID)
+    for await(const entry of fbClient.getUserItems(userID)) {
+        if (entry.item_type != feoblog.protobuf.ItemType.POST) {
+            continue
+        }
+        lastTimestamp = entry.timestamp_ms_utc
+        break        
     }
 
-    for (const status of statuses) {
-        console.log(status.toMarkdown())
-        console.log()
+    // Collect statuses we haven't saved yet:
+    const newStatuses: StatusItem[] = []
+    for await (const status of client.homeTimeline()) {
+        const item = new StatusItem(status)
+        if (lastTimestamp && item.timestamp <= lastTimestamp) { break }
+        if (!item.isPublic) { continue }
+
+        // DEBUG:
+        if (item.status.content.search("#") >= 0) {
+            console.log("content:", item.status.content)
+            console.log("markdown:", item.toMarkdown())
+        }
+
+        newStatuses.push(item)
+        if (newStatuses.length >= options.maxStatuses) { break }
+    }
+
+    console.log("Found", newStatuses.length, "new statuses")
+
+    // Insert oldest first, so that we can resume if something goes wrong:
+    newStatuses.sort(StatusItem.sortByTimestamp)
+
+    const privKey = await feoblog.PrivateKey.fromString(config.feoblog.write.password)
+    for (const status of newStatuses) {
+        const bytes = status.toItem().serialize()
+        const sig = privKey.sign(bytes)
+        await fbClient.putItem(userID, sig, bytes)
     }
 
     return 0
@@ -61,7 +88,6 @@ async function getApiKey(config: Config): Promise<number> {
     params.set("redirect_uri", REDIRECT_URI)
     params.set("response_type", "code")
 
-    // TODO: Direct user here.
     console.log("Visit the following URL in your web browser:")
     console.log(authCodeURL.toString())
     console.log()
@@ -100,18 +126,24 @@ async function getApiKey(config: Config): Promise<number> {
 
     const json = JSON.parse(body)
     const token = json.access_token
-    if (token) {
-        console.log([
-            "Success!",
-            "Update your config to match:",
-            "",
-            "[mastodon]",
-            `url = "${baseURL}"`,
-            `token = "${token}"`,
-        ].join("\n"))
+    if (!token) {
+        throw {
+            message: `Could not find access token in body`,
+            response,
+            body,
+        }
     }
 
-    return await 0
+    console.log([
+        "Success!",
+        "Update your config to match:",
+        "",
+        "[mastodon]",
+        `url = "${baseURL}"`,
+        `token = "${token}"`,
+    ].join("\n"))
+
+    return 0
 }
 
 const service = new nhm.NodeHtmlMarkdown({
@@ -188,6 +220,24 @@ class StatusItem {
         }
 
         return parts.join("\n")
+    }
+
+    toItem(): feoblog.protobuf.Item {
+        const item = new feoblog.protobuf.Item({
+            timestamp_ms_utc: this.timestamp,
+            // In theory, an ISO 8601 timestamp can contain an offset, but
+            // mastodon.social always seems to return UTC times, so no offset.
+        })
+
+        item.post = new feoblog.protobuf.Post({
+            body: this.toMarkdown()
+        })
+
+        return item
+    }
+
+    static sortByTimestamp(a: StatusItem, b: StatusItem) {
+        return a.timestamp - b.timestamp
     }
 }
     

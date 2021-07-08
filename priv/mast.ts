@@ -19,14 +19,29 @@ export class Client {
         return true
     }
 
-    // TODO: Automatic pagination.
-    async homeTimeline(): Promise<Status[]> {
-        const result = await this.checkedGET("/api/v1/timelines/home")
+    // Get one page of the home timeline, starting at maxID and continuing in reverse chronological order.
+    private async homeTimelinePage(maxID: string|undefined): Promise<Status[]> {
+        let url = "/api/v1/timelines/home"
+        if (maxID) { url += `?max_id=${maxID}` }
+
+        const result = await this.checkedGET(url)
         const json = await result.json()
         return json as Status[]
     }
 
+    /** Automatically paginate through the user's home timeline */
+    async * homeTimeline(): AsyncGenerator<Status> {
+        let maxID: string|undefined = undefined;
 
+        while (true) {
+            const statuses: Status[] = await this.homeTimelinePage(maxID)
+            if (statuses.length == 0) { return }
+            for (const status of statuses) {
+                yield status
+            }
+            maxID = statuses[statuses.length-1].id
+        }
+    }
 
     private async checkedGET(relativeURL: string): Promise<Response> {
         const result = await fetch(new Request(

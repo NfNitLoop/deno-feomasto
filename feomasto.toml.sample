@@ -1,9 +1,8 @@
 
 [mastodon]
 url = "https://mastodon.social"
-# You will need to fill in the [mastodon.client] section to acquire a token:
+# Leave blank and fill in the [mastodon.client] section to acquire a token:
 token = ""
-
 
 [mastodon.client]
 # Making requests to Mastodon requires authorization via a "client".
@@ -14,3 +13,11 @@ token = ""
 key = ""
 secret = ""
 
+[feoblog.write]
+# feomasto will write statuses from Mastodon into this Feoblog blog:
+userID = "716QP7FDUSGj2jct4tChEg6qKGgVM9UkVdVvpBzLyUeZ"
+password = "Wouldn't you like to know."
+
+[feoblog.read]
+# feomasto will read statuses from this FeoBlog blog into Mastodon:
+userID = "not yet implemented"

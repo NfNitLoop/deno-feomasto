@@ -1,4 +1,4 @@
-import {args, toml} from "./deps.ts"
+import {args, feoblog, toml} from "./deps.ts"
 
 const CLI_OPTIONS = (
     args.args
@@ -7,6 +7,11 @@ const CLI_OPTIONS = (
         type: args.Text,
         describe: "Config file to use",
         default: "./feomasto.toml"
+    }))
+    .with(args.PartialOption("maxStatuses", {
+        default: 100,
+        type: args.Integer,
+        describe: "The max number of Statuses to read from Mastodon"
     }))
 )
 
@@ -29,6 +34,8 @@ export interface Config {
     token?: string
 
     client: Client
+
+    feoblog: FeoBlog
 }
 
 /** 
@@ -40,6 +47,18 @@ interface Client {
     secret: string
 }
 
+interface FeoBlog {
+    server: string,
+
+    /** The feoblog we write to */
+    write: {
+        userID: string
+        password: string
+    }
+
+    // TODO: read
+}
+
 export async function loadConfig(fileName: string): Promise<Config> {
 
     // deno-lint-ignore no-explicit-any
@@ -48,14 +67,29 @@ export async function loadConfig(fileName: string): Promise<Config> {
     // TODO: https://www.npmjs.com/package/yup might be good for easier validation?
     
     // Defaults:
-    return {
+    const config: Config = {
         url: requireString("mastodon.url", parsed.mastodon?.url),
         token: requireString("mastodon.token", parsed.mastodon?.token || ""),
         client: {
             key: requireString("mastodon.client.key", parsed.mastodon?.client?.key || ""),
             secret: requireString("mastodon.client.secret", parsed.mastodon?.client?.secret || ""),
         },
-    }    
+        feoblog: {
+            server: requireString("feoblog.server", parsed.feoblog?.server),
+            write: {
+                userID: requireString("feoblog.write.userID", parsed.feoblog?.write?.userID),
+                password: requireString("feoblog.write.password", parsed.feoblog?.write?.password)
+            }
+        }
+    }
+
+    const privKey = await feoblog.PrivateKey.fromString(config.feoblog.write.password)
+    const userID = feoblog.UserID.fromString(config.feoblog.write.userID)
+    if (privKey.userID.toString() != userID.toString()) {
+        throw `feoblog.write: Expected private key for ${userID} but found one for ${privKey.userID}`
+    }
+
+    return config
 }
 
 function requireString(name: string, value: unknown): string {
