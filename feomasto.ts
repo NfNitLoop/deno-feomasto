@@ -194,12 +194,14 @@ class StatusItem {
             `</blockquote>`,
         ]
 
+        let attachments = s.reblog?.media_attachments || s.media_attachments
+
         // Link to attached media. (But don't inline it. Seems rude to use remote bandwidth for Mastodon servers.)
         // Though, maybe we could optionally attach it to the FeoBlog post? 🤔
-        if (s.media_attachments.length > 0) {
+        if (attachments.length > 0) {
             parts.push("<h3>Attachments:</h3>")
             parts.push("<ul>")            
-            for (const attachment of s.media_attachments) {
+            for (const attachment of attachments) {
                 const desc = attachment.description || path.basename(attachment.url)
                 let item = link(attachment.url, desc)
                 if (attachment.remote_url) {
