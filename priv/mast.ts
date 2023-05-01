@@ -4,12 +4,17 @@
 /** A client for querying Mastodon */
 export class Client {
     #baseURL: string
-    #authHeaders: Record<string, string>
+    #authHeaders: Record<string, string> 
+
+    readonly #context: StatusContext["context"]
 
     constructor({baseURL, token}: ClientOptions) {
-        this.#baseURL = baseURL
+        this.#baseURL = baseURL.replace(/\/+$/, "")
         this.#authHeaders = {
             "Authorization": `Bearer ${token}`
+        }
+        this.#context = {
+            baseURL: this.#baseURL
         }
     }
 
@@ -30,17 +35,29 @@ export class Client {
     }
 
     /** Automatically paginate through the user's home timeline */
-    async * homeTimeline(): AsyncGenerator<Status> {
+    async * homeTimeline(): AsyncGenerator<StatusContext> {
         let maxID: string|undefined = undefined;
 
         while (true) {
             const statuses: Status[] = await this.homeTimelinePage(maxID)
             if (statuses.length == 0) { return }
             for (const status of statuses) {
-                yield status
+                yield { status, context: this.#context }
             }
             maxID = statuses[statuses.length-1].id
         }
+    }
+
+    // Get a single status by ID.
+    async getStatus(id: string): Promise<StatusContext> {
+        let status = await this.#getJSON<Status>(`/api/v1/statuses/${id}`)
+        return {status, context: this.#context}
+    }
+
+    async #getJSON<T>(relPath: string): Promise<T> {
+        let res = await this.checkedGET(relPath)
+        let json = await res.json()
+        return json as T
     }
 
     private async checkedGET(relativeURL: string): Promise<Response> {
@@ -92,6 +109,10 @@ export interface Status {
     /**
      * A link to the status's HTML representation.
      * 
+     * ... Well, so say the docs at https://docs.joinmastodon.org/entities/Status/#url
+     * However, when a status is a reblog, you get a URL in the format:
+     * https://mastodon.social/users/{username}/statuses/{statusID}/activity
+     * // Which is NOT an HTML representation. 
      */
     url?: string
 
@@ -110,6 +131,16 @@ export interface Status {
 
     // TODO: Support custom emoji?
     // emojis: Emoji[]
+}
+
+export interface StatusContext {
+    status: Status,
+
+    /** Additional context about the Status, not included in its JSON */
+    readonly context: {
+        // Necessary for constructing instance-local links.
+        baseURL: string
+    }
 }
 
 export interface Account {

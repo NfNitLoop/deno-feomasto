@@ -1,30 +1,4 @@
-import {args, feoblog, toml} from "./deps.ts"
-
-const CLI_OPTIONS = (
-    args.args
-    .describe("A tool to sync Mastodon/FeoBlog")
-    .with(args.PartialOption("config", {
-        type: args.Text,
-        describe: "Config file to use",
-        default: "./feomasto.toml"
-    }))
-    .with(args.PartialOption("maxStatuses", {
-        default: 100,
-        type: args.Integer,
-        describe: "The max number of Statuses to read from Mastodon"
-    }))
-)
-
-export function getOptions() {
-    const result = CLI_OPTIONS.parse(Deno.args)
-    if (result.error) {
-        throw {
-            context: "Error parsing CLI options",
-            error: result.error,
-        }
-    }
-    return result.value
-}
+import {feoblog, toml} from "./deps.ts"
 
 export interface Config {
     // The URL 
@@ -64,7 +38,7 @@ export async function loadConfig(fileName: string): Promise<Config> {
     // deno-lint-ignore no-explicit-any
     const parsed: any = toml.parse(await loadFile(fileName))
 
-    // TODO: https://www.npmjs.com/package/yup might be good for easier validation?
+    // TODO: use Zod for schema validation:
     
     // Defaults:
     const config: Config = {

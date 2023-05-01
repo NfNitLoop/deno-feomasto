@@ -18,6 +18,3 @@ secret = ""
 userID = "716QP7FDUSGj2jct4tChEg6qKGgVM9UkVdVvpBzLyUeZ"
 password = "Wouldn't you like to know."
 
-[feoblog.read]
-# feomasto will read statuses from this FeoBlog blog into Mastodon:
-userID = "not yet implemented"

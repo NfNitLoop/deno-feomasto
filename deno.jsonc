@@ -1,0 +1,13 @@
+{
+    "tasks": {
+        "test": "deno task check && deno test --doc",
+        "check": "deno check feomasto.ts"
+    },
+    "lint": {
+        "rules": {
+            "exclude": [
+                "prefer-const"
+            ]
+        }
+    }
+}
