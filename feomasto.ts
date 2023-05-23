@@ -284,7 +284,7 @@ class StatusItem {
     private accountLink(account: mast.Account) {
         let url = this.localAccountURL(account)
         let name = account.acct
-        if (account.display_name && name.search(account.display_name) < 0) {
+        if (account.display_name && !name.includes(account.display_name)) {
             name += ` ("${account.display_name}")`
         }
         return link(url, name)
