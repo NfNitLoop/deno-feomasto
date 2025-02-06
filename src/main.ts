@@ -308,11 +308,11 @@ class StatusItem {
      */
     localURL(status?: mast.Status): string {
         status = status ?? this.status
-        return `${this.localAccountURL(status.account)}/${this.localID}`
+        return `${this.#localAccountURL(status.account)}/${status.id}`
     }
 
     /** see notes in {@link localURL} */
-    private localAccountURL(account: mast.Account): string {
+    #localAccountURL(account: mast.Account): string {
         const baseURL = this.context.context.baseURL
 
         // "foo" for local users, else: "foo@remote.host"
@@ -321,8 +321,8 @@ class StatusItem {
         return `${baseURL}/@${userID}`
     }
 
-    private accountLink(account: mast.Account) {
-        let url = this.localAccountURL(account)
+    #accountLink(account: mast.Account) {
+        const url = this.#localAccountURL(account)
         let name = account.acct
         if (account.display_name && !name.includes(account.display_name)) {
             name += ` ("${account.display_name}")`
@@ -334,15 +334,8 @@ class StatusItem {
      * The URL of this status on its origin server.
      */
     get originURL(): string {
-        let status = this.status
+        const status = this.status
         return status.url || status.uri
-    }
-
-    /**
-     * The ID of this status, but ONLY on the local mastodon instance!
-     */
-    get localID(): string {
-        return this.status.id
     }
 
     get isPublic(): boolean {
@@ -351,20 +344,23 @@ class StatusItem {
     }
 
     toMarkdown(): string {
-        // Note: We emit HTML headers/footers and convert the whole thing to markdown
-        // because that lets turndown create nice referenced links for us at the bottom
-        // of the doc, which helps readability in un-rendered Markdown.
+        // We first construct HTML, then convert that to markdown.
+        // It's simpler since HTML has explicit start/end tags.
+        // Also, the content we get from Mastodon is in HTML.
         
         const s = this.status
         const statusURL = this.localURL(s)
 
-        let parts: string[] = []
+        const parts: string[] = []
 
         if (s.reblog) {
+            // Note: statusURL is useless here. It now *always* redirects to the original post.
+            // Is there a way to link to the "X boosted [post]" UI in Mastodon?
+            // See: https://mastodon.social/@NfNitLoop/113958643687527502
             const rURL = this.localURL(s.reblog)
             parts.push(
-                `<p>${link(statusURL, "Reblogged")} by ${this.accountLink(s.account)}:`,
-                `<br>${this.accountLink(s.reblog.account)} ${link(rURL, "wrote")}:`,
+                `<p>Boosted by ${this.#accountLink(s.account)}:`,
+                `<br>${this.#accountLink(s.reblog.account)} ${link(rURL, "wrote")}:`,
                 "</p>",
                 `<blockquote>`,
                 s.reblog.content,
@@ -373,16 +369,15 @@ class StatusItem {
         } 
         // TODO: Handle replies. Need to fetch reply-to, quote it.
         else {
-            let header = 
             parts.push(
-                `<p>${this.accountLink(s.account)} ${link(statusURL, "wrote")}:</p>`,
+                `<p>${this.#accountLink(s.account)} ${link(statusURL, "wrote")}:</p>`,
                 `<blockquote>`,
                 s.content,
                 `</blockquote>`,
             )
         }
 
-        let attachments = s.reblog?.media_attachments || s.media_attachments
+        const attachments = s.reblog?.media_attachments || s.media_attachments
 
         // TODO: DO inline. Links are ugly, it turns out.
         // Link to attached media. (But don't inline it. Seems rude to use remote bandwidth for Mastodon servers.)
@@ -400,11 +395,11 @@ class StatusItem {
             parts.push("</ul>")            
         }
 
-        return htmlToMarkdown(parts.join("\n")) + this.embedFooter()
+        return htmlToMarkdown(parts.join("\n")) + this.#embedFooter()
     }
 
     /** Extra info we embed in comments at the end. */
-    private embedFooter(): string {
+    #embedFooter(): string {
         const data: Record<string,unknown> = {}
 
         const local = this.localURL()
