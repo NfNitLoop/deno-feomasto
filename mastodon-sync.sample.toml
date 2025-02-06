@@ -1,0 +1,16 @@
+
+[mastodon]
+url = "https://mastodon.social"
+
+# You can use the `getToken` subcommand to generate this token:
+token = ""
+
+[diskuto]
+# What Diskuto server should we access?
+apiUrl = "https://blog.nfnitloop.com"
+
+[diskuto.write]
+# We'll write to this user's blog:
+userID = "716QP7FDUSGj2jct4tChEg6qKGgVM9UkVdVvpBzLyUeZ"
+password = "Wouldn't you like to know."
+

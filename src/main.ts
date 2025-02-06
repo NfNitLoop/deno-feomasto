@@ -1,28 +1,21 @@
-import { loadConfig, Config } from "./priv/config.ts"
-import { feoblog, path, command, color } from "./priv/deps.ts";
-import { htmlToMarkdown } from "./priv/markdown.ts";
-import * as mast from "./priv/mast.ts";
+#!/usr/bin/env -S deno run --allow-read --allow-net --deny-env
 
-const MAIN = new command.Command()
-    .name("feomasto")
-    .description("A tool to sync Mastodon/FeoBlog")
-    .globalOption(
-        "-c, --config <config:string>",
-        "Config file to use",
-        { default: "./feomasto.toml" }
-    )
-    .globalOption(
-        "--maxStatuses <maxStatuses:number>",
-        "Max # statuses to read from Mastodon",
-        { default: 500 }
-    )
-    .action(() => {
-        MAIN.showHelp()
-    })
+import * as color from "@std/fmt/colors"
+import * as path from "@std/path"
+
+import { Config, loadConfig } from "./config.ts"
+import * as diskuto from "@diskuto/client"
+import {Command} from "@cliffy/command"
+
+import { htmlToMarkdown } from "./markdown.ts";
+import * as mast from "./mast.ts";
+import { create, type Item, ItemSchema, ItemType, PostSchema, toBinary } from "@diskuto/client/types";
+
+
 
 async function main(args: string[]) {
     try {
-        await MAIN.parse(args)
+        await mainCommand.parse(args)
         return 0
     } catch (cause) {
         console.error(cause)
@@ -30,30 +23,31 @@ async function main(args: string[]) {
     }
 }
 
-async function run(options: RunOptions): Promise<number> {
+async function runFn(options: RunOptions): Promise<number> {
     const config = await loadConfig(options.config)
 
     // TODO: If I only need the client key/secret to get a token, then
     // why put them in the config?  Let's refactor this to be an interactive
     // flow.  Use cliffy for nice prompts.
-    if (!config.token) {
-        return await getApiKey(config)
-    }
+
 
     const client = new mast.Client({
-        baseURL: config.url,
-        token: config.token
+        baseURL: config.mastodon.url,
+        token: config.mastodon.token
     })
 
-    // Find the last status saved in FeoBlog.
+    // Find the last status saved in Diskuto.
     let lastTimestamp: number|undefined = undefined
-    const fbClient = new feoblog.Client({baseURL: config.feoblog.server})
-    const userID = feoblog.UserID.fromString(config.feoblog.write.userID)
+    const fbClient = new diskuto.Client({
+        baseUrl: config.diskuto.apiUrl,
+        userAgent: "mastodon-sync"
+    })
+    const userID = config.diskuto.write.userID
     for await(const entry of fbClient.getUserItems(userID)) {
-        if (entry.item_type != feoblog.protobuf.ItemType.POST) {
+        if (entry.itemType != ItemType.POST) {
             continue
         }
-        lastTimestamp = entry.timestamp_ms_utc
+        lastTimestamp = Number(entry.timestampMsUtc)
         break        
     }
 
@@ -73,9 +67,9 @@ async function run(options: RunOptions): Promise<number> {
     // Insert oldest first, so that we can resume if something goes wrong:
     newStatuses.sort(StatusItem.sortByTimestamp)
 
-    const privKey = await feoblog.PrivateKey.fromString(config.feoblog.write.password)
+    const privKey = config.diskuto.write.password
     for (const status of newStatuses) {
-        const bytes = status.toItem().serialize()
+        const bytes = status.toItemBytes()
         const sig = privKey.sign(bytes)
         await fbClient.putItem(userID, sig, bytes)
     }
@@ -83,8 +77,36 @@ async function run(options: RunOptions): Promise<number> {
     return 0
 }
 
-MAIN.command("run", "Read from Mastodon into FeoBlog")
-    .action(run)
+
+
+type GlobalOpts = CommandGlobalOptions<typeof mainCommand>
+const mainCommand = new Command()
+    .name("mastodon-sync")
+    .description("A tool to sync Mastodon to Diskuto")
+    .globalOption(
+        "-c, --config <config:string>",
+        "Config file to use",
+        { default: "./mastodon-sync.toml" }
+    )
+    .globalOption(
+        "--maxStatuses <maxStatuses:number>",
+        "Max # statuses to read from Mastodon",
+        { default: 500 }
+    )
+    .action(() => {
+        mainCommand.showHelp()
+    })
+
+const runCommand = new Command<GlobalOpts>()
+    .name("run")
+    .description("Read from Mastodon into Diskuto")
+    .action(runFn)
+mainCommand.command(runCommand.getName(), runCommand)
+
+// Utility types to extract cliffy command types:
+type CommandOptions<C> = C extends Command<infer T1, infer T2, infer T3, infer T4, infer T5, infer T6, infer T7, infer T8> ? T3 : never
+type CommandArgs<C> = C extends Command<infer T1, infer T2, infer T3, infer T4, infer T5, infer T6, infer T7, infer T8> ? T4 : never
+type CommandGlobalOptions<C> = C extends Command<infer T1, infer T2, infer T3, infer T4, infer T5, infer T6, infer T7, infer T8> ? T5 : never
 
 
 async function test(options: RunOptions, maxStatuses: number) {
@@ -130,17 +152,17 @@ async function testStatus(options: RunOptions, statusText: string) {
 }
 
 function getMastodonClient(config: Config) {
-    if (!config.token) {
+    if (!config.mastodon.token) {
         throw new Error("You need a token first")
     }
     const client = new mast.Client({
-        baseURL: config.url,
-        token: config.token
+        baseURL: config.mastodon.url,
+        token: config.mastodon.token
     })
     return client
 }
 
-MAIN.command("test <count:number>", "Just run a test, don't write to FeoBlog")
+mainCommand.command("test <count:number>", "Just run a test, don't write any updates.")
     .action(test)
     // TODO: Aw, no multi-level subcommands?
     .command("test-status <id:string>", "Just test against one particular status")
@@ -151,14 +173,34 @@ interface RunOptions {
     maxStatuses: number
 }
 
+function pPrompt(message: string, defaultValue?: string): string {
+    let value = prompt(message + "\n:", defaultValue)
+    console.log()
+    if (!value) {
+        throw new Error(`User entered no value`)
+    }
+
+    value = value.trim()
+    if (value.length == 0) {
+        throw new Error(`User entered empty string`)
+    }
+
+    return value
+}
 
 
 // TODO: Move into the mastodon client?
 // Prompt the user to create an API key.
-async function getApiKey(config: Config): Promise<number> {
-    
-    if (!config.client.key) { throw `client.key is missing from your config` }
-    if (!config.client.secret) { throw `client.secret is missing from your config` }
+async function getTokenFn(): Promise<void> {
+
+    const server = pPrompt("What mastodon server do you want to connect to?", "https://mastodon.social")
+
+    console.log(`Visit this URL to add a new "application":`)
+    console.log(`${server}/settings/applications`)
+    console.log()
+    console.log(`Then enter the credentials from your new app here:`)
+    const key = pPrompt("Client key")!
+    const secret = pPrompt("Client secret")!
 
     // See: https://github.com/hylyh/node-mastodon/wiki/Getting-an-access_token-with-the-oauth-package
     // var oauth = new OAuth2('your_client_id', 'your_client_secret', 'https://mastodon.social', null, '/oauth/token');
@@ -170,12 +212,11 @@ async function getApiKey(config: Config): Promise<number> {
 
     // oauth.getOAuthAccessToken('code from the authorization page that user should paste into your app', { grant_type: 'authorization_code', redirect_uri: 'urn:ietf:wg:oauth:2.0:oob' }, function(err, accessToken, refreshToken, res) { console.log(accessToken); })
     // TODO: Get from config:
-    const baseURL = "https://mastodon.social"
 
     // See: https://docs.joinmastodon.org/client/authorized/
-    const authCodeURL = new URL(`${baseURL}/oauth/authorize`)
+    const authCodeURL = new URL(`${server}/oauth/authorize`)
     const params = authCodeURL.searchParams
-    params.set("client_id", config.client.key)
+    params.set("client_id", key)
     // params.set("scope", /* TODO */) 
     params.set("redirect_uri", REDIRECT_URI)
     params.set("response_type", "code")
@@ -184,18 +225,13 @@ async function getApiKey(config: Config): Promise<number> {
     console.log(authCodeURL.toString())
     console.log()
     console.log("Grant access, then paste the code below.")
-    
-    const code = prompt("Code?\n:")
-    if (!code) {
-        console.error("No code entered")
-        return 1
-    }
+    const code = pPrompt("Code")
 
-    const req = new Request(`${baseURL}/oauth/token`, {
+    const req = new Request(`${server}/oauth/token`, {
         method: "POST", 
         body: new URLSearchParams({
-            "client_id": config.client.key,
-            "client_secret": config.client.secret,
+            "client_id": key,
+            "client_secret": secret,
             "grant_type": "authorization_code",
             "redirect_uri": REDIRECT_URI,
             "code": code,
@@ -213,7 +249,7 @@ async function getApiKey(config: Config): Promise<number> {
             console.log(key, "=", value)
         }
         console.log("body", body)
-        return 1
+        throw new Error(`API Error`)
     }
 
     const json = JSON.parse(body)
@@ -231,12 +267,16 @@ async function getApiKey(config: Config): Promise<number> {
         "Update your config to match:",
         "",
         "[mastodon]",
-        `url = "${baseURL}"`,
+        `url = "${server}"`,
         `token = "${token}"`,
     ].join("\n"))
-
-    return 0
 }
+
+const getKeyCommand = new Command()
+    .name("getToken")
+    .description("Get an auth token from your Mastodon instance")
+    .action(getTokenFn)
+mainCommand.command(getKeyCommand.getName(), getKeyCommand)
 
 /** Some utility functions on top of a mast.Status */
 class StatusItem {
@@ -346,7 +386,6 @@ class StatusItem {
 
         // TODO: DO inline. Links are ugly, it turns out.
         // Link to attached media. (But don't inline it. Seems rude to use remote bandwidth for Mastodon servers.)
-        // Though, maybe we could optionally attach it to the FeoBlog post? 🤔
         if (attachments.length > 0) {
             parts.push("<h3>Attachments:</h3>")
             parts.push("<ul>")            
@@ -366,10 +405,10 @@ class StatusItem {
 
     /** Extra info we embed in comments at the end. */
     private embedFooter(): string {
-        let data: Record<string,unknown> = {}
+        const data: Record<string,unknown> = {}
 
-        let local = this.localURL()
-        let origin = this.originURL
+        const local = this.localURL()
+        const origin = this.originURL
         if (local != origin) {
             if (this.status.reblog) {
                 // The URLs don't match because the origin URL here is a "reblog activity", which
@@ -393,18 +432,25 @@ class StatusItem {
         ].join("\n")
     }
 
-    toItem(): feoblog.protobuf.Item {
-        const item = new feoblog.protobuf.Item({
-            timestamp_ms_utc: this.timestamp,
+    toItem(): Item {
+        const item = create(ItemSchema, {
+            timestampMsUtc: BigInt(this.timestamp),
             // In theory, an ISO 8601 timestamp can contain an offset, but
             // mastodon.social always seems to return UTC times, so no offset.
-        })
 
-        item.post = new feoblog.protobuf.Post({
-            body: this.toMarkdown()
+            itemType: {
+                case: "post",
+                value: create(PostSchema, {
+                    body: this.toMarkdown()
+                })
+            }
         })
 
         return item
+    }
+
+    toItemBytes(): Uint8Array {
+        return toBinary(ItemSchema, this.toItem())
     }
 
     static sortByTimestamp(a: StatusItem, b: StatusItem) {
@@ -421,7 +467,7 @@ class StatusItem {
         console.log()
         console.log(color.yellow("status.id"), this.status.id)
         console.log(color.blue("body:"))
-        console.log(this.toItem().post.body)
+        console.log(this.toMarkdown())
     }
 }
 
