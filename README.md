@@ -1,3 +1,5 @@
+[![JSR Version]][JSR Link]
+
 mastodon-sync
 =============
 
@@ -16,3 +18,6 @@ Then just periodically run `mastodon-sync run` to sync.
 [Diskuto]: https://github.com/diskuto
 [Deno]: https://deno.com/
 [mastodon-sync.sample.toml]: ./mastodon-sync.sample.toml
+
+[JSR Version]: https://jsr.io/badges/@diskuto/mastodon-sync
+[JSR Link]: https://jsr.io/@diskuto/mastodon-sync
