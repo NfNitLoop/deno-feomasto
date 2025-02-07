@@ -1,7 +1,8 @@
-#!/usr/bin/env -S deno run --allow-read --allow-net --deny-env
+#!/usr/bin/env -S deno run -RN --deny-env --check
 
 import * as color from "@std/fmt/colors"
 import * as path from "@std/path"
+import * as html from "@std/html"
 
 import { Config, loadConfig } from "./config.ts"
 import * as diskuto from "@diskuto/client"
@@ -10,7 +11,7 @@ import {Command} from "@cliffy/command"
 import { htmlToMarkdown } from "./markdown.ts";
 import * as mast from "./mast.ts";
 import { create, type Item, ItemSchema, ItemType, PostSchema, toBinary } from "@diskuto/client/types";
-
+import { lazy } from "@nfnitloop/better-iterators"
 
 
 async function main(args: string[]) {
@@ -135,18 +136,18 @@ async function test(options: RunOptions, maxStatuses: number) {
 
 /** Just read and render one text.  */
 async function testStatus(options: RunOptions, statusText: string) {
-    const pat = /\/(\d+)$/
+    const pat = /(\d+)$/
     const match = pat.exec(statusText)
     if (!match) {
         throw new Error(`Invalid status ID: ${statusText}`)
     }
-    let statusId = match[1]
+    const statusId = match[1]
 
     const config = await loadConfig(options.config)
     const client = getMastodonClient(config)
 
 
-    let status = new StatusItem(await client.getStatus(statusId))
+    const status = new StatusItem(await client.getStatus(statusId))
 
     status.debugPrint()
 }
@@ -379,18 +380,32 @@ class StatusItem {
 
         const attachments = s.reblog?.media_attachments || s.media_attachments
 
-        // TODO: DO inline. Links are ugly, it turns out.
-        // Link to attached media. (But don't inline it. Seems rude to use remote bandwidth for Mastodon servers.)
-        if (attachments.length > 0) {
+        const {matches: images, others} = lazy(attachments).partition(a => a.type == "image")
+
+        if (images.length > 0) {
+            parts.push(`<p>`)
+            for (const [index, image] of images.entries()) {
+                if (index > 0) {
+                    parts.push(`<br/>`)
+                }
+                parts.push(
+                    imageLink({
+                        src: image.url,
+                        link: image.url,
+                        altText: image.description ?? null
+                    })
+                )
+            }
+            parts.push(`</p>`)
+        }
+
+        if (others.length > 0) {
             parts.push("<h3>Attachments:</h3>")
             parts.push("<ul>")            
-            for (const attachment of attachments) {
+            for (const attachment of others) {
                 const desc = attachment.description || path.basename(attachment.url)
-                let item = link(attachment.url, desc)
-                if (attachment.remote_url) {
-                    item += ` (${link(attachment.remote_url, "remote")})`
-                }
-                parts.push(`  <li>${item}</li>`)
+                const item = link(attachment.url, desc)
+                parts.push(`  <li>${attachment.type}: ${item}</li>`)
             }
             parts.push("</ul>")            
         }
@@ -468,12 +483,37 @@ class StatusItem {
 }
 
 function link(href: string, text: string): string {
-    text = text.replaceAll(`<`, "&lt;")
+    return `<a href="${quoteAttr(href)}">${html.escape(text)}</a>`
+}
 
-    // For links that are getting converted into markdown, newlines break them.
-    text = text.replaceAll(`\n`, " ")
+function imageLink({src, link, altText}: ImageLinkProps) {
+    if (!link) {
+        link = src
+    }
+    const imgParts = [
+        `<img`,
+        `src="${quoteAttr(src)}"`
+    ]
+    if (altText) {
+        imgParts.push(`alt="${quoteAttr(altText)}"`)
+    }
+    imgParts.push(`/>`)
 
-    return `<a href="${href}">${text}</a>`
+    const img = imgParts.join(" ")
+
+    return `<a href="${quoteAttr(link)}">${img}</a>`
+}
+
+type ImageLinkProps = {
+    src: string, 
+    link: string
+    altText: string | null
+}
+
+// html.escape() would work for this too, but it ends up
+// escaping a lot of unnecessary stuff for our use case.
+function quoteAttr(value: string): string {
+    return value.replaceAll(`"`, "&quot;")
 }
     
 

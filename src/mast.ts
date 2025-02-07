@@ -1,4 +1,3 @@
-import { AttachmentHash } from "@diskuto/client";
 import * as z from "zod"
 
 /** A client for querying Mastodon */
@@ -122,7 +121,7 @@ const Attachment = z.object({
     remote_url: z.string().nullable().optional(),
     description: z.string().nullable().optional(),
 
-    /** image/video/audio */
+    /** image/video/audio, other? */
     type: z.string()
 }).passthrough()
 
