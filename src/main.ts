@@ -1,5 +1,7 @@
 #!/usr/bin/env -S deno run -RN --deny-env --check
 
+// See: README.md
+
 import * as color from "@std/fmt/colors"
 import * as path from "@std/path"
 import * as html from "@std/html"
@@ -63,7 +65,7 @@ async function runFn(options: RunOptions): Promise<number> {
         if (newStatuses.length >= options.maxStatuses) { break }
     }
 
-    console.log("Found", newStatuses.length, "new statuses")
+    console.log("Copied", newStatuses.length, "new statuses")
 
     // Insert oldest first, so that we can resume if something goes wrong:
     newStatuses.sort(StatusItem.sortByTimestamp)

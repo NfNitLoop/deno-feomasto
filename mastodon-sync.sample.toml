@@ -10,7 +10,9 @@ token = ""
 apiUrl = "https://blog.nfnitloop.com"
 
 [diskuto.write]
-# We'll write to this user's blog:
-userID = "716QP7FDUSGj2jct4tChEg6qKGgVM9UkVdVvpBzLyUeZ"
-password = "Wouldn't you like to know."
+# We'll write to this user's blog.
+# This should be a userID used only for this purpose, because
+# we'll use its posts to know where to resume synchronization.
+userID = "TODO"
+password = "TODO"
 
