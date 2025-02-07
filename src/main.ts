@@ -400,7 +400,7 @@ class StatusItem {
 
     /** Extra info we embed in comments at the end. */
     #embedFooter(): string {
-        const data: Record<string,unknown> = {}
+        const data: string[] = []
 
         const local = this.localURL()
         const origin = this.originURL
@@ -408,21 +408,22 @@ class StatusItem {
             if (this.status.reblog) {
                 // The URLs don't match because the origin URL here is a "reblog activity", which
                 // isn't an HTML rendering of the thing.
-                // We'll track it in the body, but no need to display/link to it.
-                data.reblog = { activity: origin }
+                // We'll track it in the body, but no need to display/link to it, because it
+                // doesn't get rendered into HTML, AFAIK. :(
+                data.push(`reblog: ${origin}`)
             } else {
-                data.originURL = origin
+                data.push(`origin: ${origin}`)
             }
         }
 
-        if (Object.getOwnPropertyNames(data).length == 0) {
+        if (data.length == 0) {
             return ""
         }
         return [
             "", // Last line might not end in a newline.
             "", // extra separation from Markdown content.
             "<!--",
-            JSON.stringify(data, null, 2),
+            ...data,
             "-->"
         ].join("\n")
     }
